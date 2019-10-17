@@ -4,7 +4,7 @@ import tftables
 
 
 class VariationalAutoencoder:
-    def __init__(self, network_architecture, learning_rate=0.001, batch_size=50):
+    def __init__(self, network_architecture, data_file, learning_rate=0.001, batch_size=50):
         """Set up the VAE.
 
         Args:
@@ -26,7 +26,7 @@ class VariationalAutoencoder:
 
         # Set up the network
         tf.reset_default_graph()
-        self._create_data_pipe()
+        self._create_data_pipe(data_file)
         self._create_network()
         self._create_optimizers()
 
@@ -39,9 +39,9 @@ class VariationalAutoencoder:
         self.loader.start(self.sess)
         self.sess.run(init)
 
-    def _create_data_pipe(self):
+    def _create_data_pipe(self, data_file):
         """Create a loader via tftables that will load data."""
-        self.loader = tftables.load_dataset(filename="data/sample_8k.h5",
+        self.loader = tftables.load_dataset(filename=data_file,
                                        dataset_path="/spectra",
                                        input_transform=self._input_transform,
                                        batch_size=self.batch_size,
