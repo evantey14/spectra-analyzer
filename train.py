@@ -6,10 +6,9 @@ import os
 import sys
 import time
 
-import horovod.tensorflow as hvd
 import numpy as np
 import tensorflow as tf
-import graphics
+#import graphics
 from utils import ResultLogger
 
 learn = tf.contrib.learn
@@ -311,13 +310,12 @@ def tensorflow_session():
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
     # Pin GPU to local rank (one GPU per process)
-    config.gpu_options.visible_device_list = str(hvd.local_rank())
+    # config.gpu_options.visible_device_list = str(hvd.local_rank())
     sess = tf.Session(config=config)
     return sess
 
 
-if __name__ == "__main__":
-
+def setup():
     # This enables a ctr-C without triggering errors
     import signal
     signal.signal(signal.SIGINT, lambda x, y: sys.exit(0))
@@ -411,4 +409,4 @@ if __name__ == "__main__":
                         help="Coupling type: 0=additive, 1=affine")
 
     hps = parser.parse_args()  # So error if typo
-    main(hps)
+    return hps
