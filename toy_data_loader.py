@@ -33,10 +33,11 @@ def create_data_loader(sess, batch_size, n_data, n_bins, sample_prior=_sample_de
     dataset = tf.data.Dataset.from_tensor_slices(placeholder_data)
     dataset = dataset.batch(batch_size)
     iterator = dataset.make_initializable_iterator()
+    input_stream = iterator.get_next()
 
-    def initialize_iterator():
+    def initialize_input_stream():
         sess.run(iterator.initializer, feed_dict={placeholder_data: data})
 
-    initialize_iterator()
-    data_init = sess.run(iterator.get_next())
-    return iterator, initialize_iterator, data_init
+    initialize_input_stream()
+    data_init = sess.run(input_stream)
+    return iterator.get_next(), initialize_input_stream, data_init
