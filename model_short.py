@@ -42,14 +42,14 @@ def model(sess, hps, train_iterator, data_init):
     # Only for decoding/init, rest use iterators directly
     with tf.name_scope('input'):
         X = tf.compat.v1.placeholder(
-            tf.float32, [None, 40000, 1], name='spectrum')
+            tf.float32, [None, hps.n_bins, 1], name='spectrum')
         lr = tf.compat.v1.placeholder(tf.float32, None, name='learning_rate')
         
     def encoder(z, objective):
         eps = []
         for i in range(hps.n_levels):
             hps.objectives.append(tf.reduce_mean(objective))
-            hps.log.append("encoder level "+str(i))
+            #hps.log.append("encoder level "+str(i))
             hps.z_means.append(tf.reduce_mean(z))
             hps.z_stds.append(tf.math.reduce_std(z))
             print("creating revnet level", i, z.get_shape())
@@ -58,7 +58,7 @@ def model(sess, hps, train_iterator, data_init):
                 print("splitting z", z.get_shape())
                 z, objective, _eps = split1d("pool"+str(i), z, objective=objective)
                 hps.objectives.append(tf.reduce_mean(objective))
-                hps.log.append("end of encoder level "+str(i))
+                #hps.log.append("end of encoder level "+str(i))
                 eps.append(_eps)
         hps.z_means.append(tf.reduce_mean(z))
         hps.z_stds.append(tf.math.reduce_std(z))
@@ -96,14 +96,15 @@ def model(sess, hps, train_iterator, data_init):
             objective += logp(z)
             hps.logpz.append(tf.reduce_mean(logp(z)))
             hps.objectives.append(tf.reduce_mean(objective))
-            hps.log.append("post prior")
+            #hps.log.append("post prior")
 
             nobj = -objective
             bits_x = nobj / (np.log(2.) * int(x.get_shape()[1]) * int(x.get_shape()[2]))  # bits per subpixel
 
         local_loss = bits_x
         stats = [local_loss]
-        global_stats = tf.stack([tf.reduce_mean(local_loss), -1, *hps.objectives, -1, *hps.logpz])
+        global_stats = tf.stack([tf.reduce_mean(local_loss)]) 
+        #global_stats = tf.stack([tf.reduce_mean(local_loss), -1, *hps.objectives, -1, *hps.logpz])
         #print(global_stats.get_shape(), global_stats)
         #print(hps.objectives.get_shape(), hps.objective)
 #        global_stats = Z.allreduce_mean(
@@ -177,10 +178,10 @@ def revnet2d_step(name, z, logdet, hps, reverse):
         if not reverse:
             z, logdet = Z.actnorm("actnorm", z, logdet=logdet, hps=hps)
             hps.objectives.append(tf.reduce_mean(logdet))
-            hps.log.append(name+"post-actnorm")
+            #hps.log.append(name+"post-actnorm")
             z, logdet = invertible_1x1_conv("invconv", z, logdet)
             hps.objectives.append(tf.reduce_mean(logdet))
-            hps.log.append(name+"post-1x1conv")
+            #hps.log.append(name+"post-1x1conv")
             z1 = z[:, :, :n_channels // 2]
             z2 = z[:, :, n_channels // 2:]
             z2 += f("f1", z1, hps.width)

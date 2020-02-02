@@ -32,7 +32,7 @@ def adam(params, cost_or_grads, alpha=3e-4, hps=None, epsilon=1e-8):
     else:
         gs = cost_or_grads
 
-    beta2 = 1-1./(hps.train_its*hps.polyak_epochs)
+    beta2 = 1-1./(hps.n_batches*hps.polyak_epochs)
 
     # all-reduce
     grads = [Z.allreduce_mean(g) for g in gs]
@@ -76,7 +76,7 @@ def adam2(params, cost_or_grads, alpha=3e-4, hps=None, epsilon=1e-8):
     else:
         gs = cost_or_grads
 
-    beta2 = 1-1./(hps.train_its*hps.polyak_epochs)
+    beta2 = 1-1./(hps.n_batches*hps.polyak_epochs)
 
     # all-reduce
     grads1 = [Z.allreduce_mean(g) for g in gs]
@@ -153,7 +153,7 @@ def adamax(params, cost_or_grads, alpha=3e-4, hps=None, epsilon=1e-8):
     else:
         gs = cost_or_grads
 
-    beta2 = 1-1./(hps.train_its*hps.polyak_epochs)
+    beta2 = 1-1./(hps.n_batches*hps.polyak_epochs)
 
     # all-reduce
     grads = gs #[Z.allreduce_mean(g) for g in gs]
@@ -190,7 +190,7 @@ def adam(params, cost_or_grads, alpha=3e-4, hps=None, epsilon=1e-8):
     else:
         gs = cost_or_grads
 
-    beta2 = 1-1./(hps.train_its*hps.polyak_epochs)
+    beta2 = 1-1./(hps.n_batches*hps.polyak_epochs)
 
     # all-reduce
     grads = [Z.allreduce_mean(g) for g in gs]
