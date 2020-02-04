@@ -1,6 +1,5 @@
 import numpy as np
 import tensorflow as tf
-from tensorflow.contrib.framework.python.ops import add_arg_scope
 
 import tfops_short as Z
 import optim_short as optim
@@ -106,7 +105,6 @@ class model:
 
         return tf.reduce_mean(local_loss), stats
 
-@add_arg_scope
 def revnet2d(name, z, logdet, hps, reverse=False):
     with tf.compat.v1.variable_scope(name):
         if not reverse:
@@ -117,7 +115,6 @@ def revnet2d(name, z, logdet, hps, reverse=False):
                 z, logdet = revnet2d_step('revnetstep'+str(i), z, logdet, hps, reverse)
     return z, logdet
 
-@add_arg_scope
 def revnet2d_step(name, z, logdet, hps, reverse):
     with tf.compat.v1.variable_scope(name):
         batch_size, length, n_channels = Z.int_shape(z)
@@ -139,7 +136,6 @@ def revnet2d_step(name, z, logdet, hps, reverse):
             
     return z, logdet
 
-@add_arg_scope
 def invertible_1x1_conv(name, z, logdet, reverse=False):
     with tf.compat.v1.variable_scope(name):
         batch_size, length, n_channels = Z.int_shape(z)
@@ -171,7 +167,6 @@ def f(name, h, width, n_out=None):
         h = Z.conv1d_zeros('l_last', h, n_out, filter_size=[3])
     return h
 
-@add_arg_scope
 def split1d(name, z, objective=0.):
     with tf.compat.v1.variable_scope(name):
         n_z = Z.int_shape(z)[2]
@@ -184,7 +179,6 @@ def split1d(name, z, objective=0.):
         eps = pz.get_eps(z2)
         return z1, objective, eps
     
-@add_arg_scope
 def split1d_reverse(name, z, eps=None, eps_std=None):
     with tf.variable_scope(name):
         z1 = Z.unsqueeze(z, 2)
@@ -201,7 +195,6 @@ def split1d_reverse(name, z, eps=None, eps_std=None):
         z = tf.concat([z1, z2], 2)
         return z
     
-@add_arg_scope
 def split1d_prior(z):
     n_channels = int(z.get_shape()[2])
     h = Z.conv1d_zeros('conv', z, 2 * n_channels, filter_size=[3]) # again just for learning prior?
