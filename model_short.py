@@ -64,16 +64,16 @@ class model:
         z = x - .5
         z = Z.squeeze(z, 4)
         logpx = tf.zeros_like(x, dtype='float32')[:, 0, 0]
-        with tf.compat.v1.variable_scope('model', reuse=tf.AUTO_REUSE):
+        with tf.compat.v1.variable_scope('model', reuse=tf.compat.v1.AUTO_REUSE):
             # Compress latent representations with revnets and splits
             for i in range(hps.n_levels):
                 z, logpx = revnet2d('revnet' + str(i), z, logpx, hps)
                 if i < hps.n_levels - 1:
-                    z, logpx, _ = split1d('pool' + str(i), z, objective=logpx)
+                    z, logpx, _ = split1d('pool' + str(i), z, logpx)
 
             # Compute the prior on the final latent representation.
             hps.top_shape = Z.int_shape(z)[1:]
-            logp, _, _ = prior('prior', hps.batch_size, hps)
+            logp, _, _ = prior('prior', z)
             logpx += logp(z)
             return z, logpx
 
@@ -87,7 +87,7 @@ class model:
         Returns:
             x: tensor with shape [?, n_bins, 1]
         '''
-        with tf.compat.v1.variable_scope('model', reuse=tf.AUTO_REUSE):
+        with tf.compat.v1.variable_scope('model', reuse=tf.compat.v1.AUTO_REUSE):
             for i in reversed(range(hps.n_levels)):
                 if i < hps.n_levels - 1:
                     z = split1d_reverse('pool' + str(i), z)
@@ -167,7 +167,7 @@ def f(name, h, width, n_out=None):
         h = Z.conv1d_zeros('l_last', h, n_out, filter_size=[3])
     return h
 
-def split1d(name, z, objective=0.):
+def split1d(name, z, objective):
     with tf.compat.v1.variable_scope(name):
         n_z = Z.int_shape(z)[2]
         z1 = z[:, :, :n_z // 2]
@@ -196,19 +196,22 @@ def split1d_reverse(name, z, eps=None, eps_std=None):
         return z
     
 def split1d_prior(z):
-    n_channels = int(z.get_shape()[2])
-    h = Z.conv1d_zeros('conv', z, 2 * n_channels, filter_size=[3]) # again just for learning prior?
-
-    mean = h[:, :, 0::2]
-    logs = h[:, :, 1::2]
+    # length, n_channels = Z.int_shape(z)[1:]
+    # h = Z.conv1d_zeros('conv', z, 2 * n_channels, filter_size=[3]) # again just for learning prior?
+    # mean = h[:, :, 0::2]
+    # logs = h[:, :, 1::2]
+    mean = tf.zeros_like(z, dtype='float32')
+    logs = tf.zeros_like(z, dtype='float32')
     return Z.gaussian_diag(mean, logs)
 
-def prior(name, batch_size, hps):
+def prior(name, z):
     with tf.compat.v1.variable_scope(name):
-        length, n_channels = hps.top_shape
-        h = tf.zeros([batch_size, length, 2 * n_channels])
+        #length, n_channels = hps.top_shape
+        #h = tf.zeros([batch_size, length, 2 * n_channels])
         #h = Z.conv1d_zeros('p', h, 2 * n_channels, filter_size=[3]) # for learning prior?
-        pz = Z.gaussian_diag(h[:, :, :n_channels], h[:, :, n_channels:])
+        mean = tf.zeros_like(z, dtype='float32')
+        logs = tf.zeros_like(z, dtype='float32')
+        pz = Z.gaussian_diag(mean, logs)
 
     def logp(z1):
         return pz.logp(z1)
