@@ -42,11 +42,12 @@ class model:
 
         # === Saving and restoring
         # not entirely sure what this does / if it works
-        saver = tf.compat.v1.train.Saver()
-        saver_ema = tf.compat.v1.train.Saver(ema.variables_to_restore())
-        self.save_ema = lambda path: saver_ema.save(sess, path, write_meta_graph=False)
-        self.save = lambda path: saver.save(sess, path, write_meta_graph=False)
-        self.restore = lambda path: saver.restore(sess, path)
+        with tf.device('/cpu:0'):
+            saver = tf.compat.v1.train.Saver()
+            saver_ema = tf.compat.v1.train.Saver(ema.variables_to_restore())
+            self.save_ema = lambda path: saver_ema.save(sess, path, write_meta_graph=False)
+            self.save = lambda path: saver.save(sess, path, write_meta_graph=False)
+            self.restore = lambda path: saver.restore(sess, path)
 
     def _create_encoder(self, x, hps):
         '''Set up encoder tensors to pipe input spectra x to a latent representation
