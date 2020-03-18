@@ -20,10 +20,10 @@ def _generate_spectrum(n_bins, T, A, mu, sigma):
 
 def _sample_default_prior():
     '''Sample a point from test prior.'''
-    T = np.random.uniform(2000, 7000)
-    A = np.random.normal(.8, .1) # size of the dip should be fairly large
+    T = np.random.uniform(2000, 5000)
+    A = 1 / (1 + np.exp(-(np.random.normal(-1, 1.5)))) # dip should go from 0 to .75
     mu = np.random.normal(1.5e-6, .01e-6) # dip should vaguely appear in the same place
-    sigma = np.random.normal(.01e-6, .01e-6) # dip width should be narrow
+    sigma = np.random.normal(.05e-6, .01e-6)
     return T, A, mu, sigma
 
 def create_data_loader(sess, batch_size, n_data, n_bins, sample_prior=_sample_default_prior):

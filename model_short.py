@@ -31,8 +31,8 @@ class model:
         # === Encoding and decoding
         encode_op, _ = self._create_encoder(self.input_placeholder, hps)
         self.encode = lambda spectra: self.sess.run(encode_op, {self.input_placeholder: spectra})
-        decode_op = self._create_decoder(self.z_placeholder, hps)
-        self.decode = lambda z: self.sess.run(decode_op, {self.z_placeholder: z})
+        self.decoded_spectra = self._create_decoder(self.z_placeholder, hps)
+        self.decode = lambda z: self.sess.run(self.decoded_spectra, {self.z_placeholder: z})
         reconstruct_op = self._create_decoder(encode_op, hps)
         self.reconstruct = lambda spectra: self.sess.run(reconstruct_op, {self.input_placeholder: spectra})
 
