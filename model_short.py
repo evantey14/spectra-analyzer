@@ -21,12 +21,8 @@ class model:
 
         # === Loss and optimizer
         self.loss, self.stats = self.f_loss(self.train_iterator, hps)
-        all_params = tf.compat.v1.trainable_variables()
-        gradients = tf.gradients(self.loss, all_params)
-        train_op, polyak_swap_op, ema = optim.adamax(all_params, gradients, alpha=self.lr, hps=hps)
-        
+        train_op = tf.train.AdamOptimizer(learning_rate=self.lr).minimize(self.loss)
         self.train = lambda _lr: self.sess.run([train_op, self.stats], {self.lr: _lr})[1]
-        self.polyak_swap = lambda: self.sess.run(polyak_swap_op)
 
         # === Encoding and decoding
         encode_op, _ = self._create_encoder(self.input_placeholder, hps)
@@ -44,8 +40,6 @@ class model:
         # not entirely sure what this does / if it works
         with tf.device('/cpu:0'):
             saver = tf.compat.v1.train.Saver()
-            saver_ema = tf.compat.v1.train.Saver(ema.variables_to_restore())
-            self.save_ema = lambda path: saver_ema.save(sess, path, write_meta_graph=False)
             self.save = lambda path: saver.save(sess, path, write_meta_graph=False)
             self.restore = lambda path: saver.restore(sess, path)
 
