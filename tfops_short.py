@@ -50,8 +50,7 @@ def actnorm(name, x, scale=1., logdet=None, hps=None, logscale_factor=1., batch_
 def actnorm_center(name, x, reverse=False):
     # add a bias to x so it's centered around 0
     with tf.compat.v1.variable_scope(name):
-        x_mean = tf.reduce_mean(x, [0, 1], keepdims=True)
-        b = get_variable_ddi("b", (1, 1, int_shape(x)[2]), initial_value=-x_mean)
+        b = tf.get_variable("b", (1, 1, int_shape(x)[2]), initializer=tf.zeros_initializer())
         if not reverse:
             x += b
         else:
@@ -63,15 +62,10 @@ def actnorm_scale(
     name, x, scale=1., logdet=None, hps=None, logscale_factor=3., batch_variance=False, reverse=False, init=False, trainable=True
 ):
     with tf.compat.v1.variable_scope(name), arg_scope([get_variable_ddi], trainable=trainable):
-        x_var = tf.reduce_mean(x**2, [0, 1], keepdims=True)
         logdet_factor = int_shape(x)[1]
         _shape = (1, 1, int_shape(x)[2])
 
-        if batch_variance: # not sure what this does...I think we're already getting batch_variance?
-            x_var = tf.reduce_mean(x**2, keepdims=True)
-
-        logs = get_variable_ddi("logs", _shape, initial_value=tf.math.log(
-            scale/(tf.sqrt(x_var)+1e-6))/logscale_factor)*logscale_factor
+        logs = tf.get_variable("logs", _shape, initializer=tf.zeros_initializer()) * logscale_factor
         if not reverse:
             x = x * tf.exp(logs)
         else:
