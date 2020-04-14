@@ -34,7 +34,7 @@ class model:
         self.z, self.logpx, self.intermediate_zs = self._create_encoder(self.s_placeholder)
         self.s = self._create_decoder(self.z_placeholder)
         self.s_from_intermediate_zs = self._create_decoder(self.z_placeholder,
-                                                          self.intermediate_z_placeholders)
+                                                           self.intermediate_z_placeholders)
 
         # === Initialize
         sess.run(tf.compat.v1.global_variables_initializer()) # not sure if more initialization is needed?
@@ -76,7 +76,7 @@ class model:
                 for j in range(self.hps.depth):
                     z, logpx = self._flow_step('flow-level{}-depth{}'.format(i, j), z, logpx)
                 if i < self.hps.n_levels - 1:
-                    z1, z2 = self._split(z)
+                    z1, z2 = Z.split(z)
                     intermediate_prior = self._create_prior(z2)
                     logpx += intermediate_prior.logp(z2)
                     intermediate_zs.append(z2)
@@ -104,40 +104,29 @@ class model:
                         z2 = intermediate_prior.sample()
                     else:
                         z2 = intermediate_zs[i]
-                    z = self._unsplit(z1, z2)
+                    z = Z.unsplit(z1, z2)
                 for j in reversed(range(self.hps.depth)):
-                    z, _= self._reverse_flow_step('flow-level{}-depth{}'.format(i, j), z)
+                    z = self._reverse_flow_step('flow-level{}-depth{}'.format(i, j), z)
             x = Z.unsqueeze(z + .5, 4) # post-process spectra
             return x
 
-    # move to tfops
-    def _split(self, z):
-        '''Split a (batch_size, length, n_channels) tensor in half across the channel dimension.'''
-        assert int(z.get_shape()[2]) == 4
-        return z[:, :, :2], z[:, :, 2:]
-
-    # move to tfops
-    def _unsplit(self, z1, z2):
-        '''Recombine two tensors across the channel dimension.'''
-        return tf.concat([z1, z2], 2)
-
     def _flow_step(self, name, z, logdet):
         with tf.compat.v1.variable_scope(name):
-            z, logdet = Z.actnorm('actnorm', z, logdet=logdet, reverse=False)
+            z, logdet = Z.actnorm('actnorm', z, logdet)
             z, logdet = self._invertible_1x1_conv('invconv', z, logdet, reverse=False)
-            z1, z2 = self._split(z)
-            z2 += self._f('f1', z1, self.hps.width)
-            z = self._unsplit(z1, z2)
+            z1, z2 = Z.split(z)
+            z2 += self._f('f', z1, self.hps.width)
+            z = Z.unsplit(z1, z2)
             return z, logdet
 
     def _reverse_flow_step(self, name, z):
         with tf.compat.v1.variable_scope(name):
-            z1, z2 = self._split(z)
-            z2 -= self._f('f1', z1, self.hps.width)
-            z = self._unsplit(z1, z2)
-            z, logdet = self._invertible_1x1_conv('invconv', z, 0, reverse=True)
-            z, logdet = Z.actnorm('actnorm', z, logdet=0, reverse=True)
-            return z, logdet
+            z1, z2 = Z.split(z)
+            z2 -= self._f('f', z1, self.hps.width)
+            z = Z.unsplit(z1, z2)
+            z, _ = self._invertible_1x1_conv('invconv', z, 0, reverse=True)
+            z = Z.actnorm_reverse('actnorm', z)
+            return z
 
     # move to tfops
     def _invertible_1x1_conv(self, name, z, logdet, reverse=False):
@@ -166,13 +155,13 @@ class model:
             return z, logdet
 
     # move to tfops
-    def _f(self, name, h, width, n_out=None):
-        n_out = n_out or int(h.get_shape()[2])
+    def _f(self, name, z, channels_out):
+        original_channels = int(z.get_shape()[2])
         with tf.compat.v1.variable_scope(name):
-            h = tf.nn.relu(Z.conv1d('l_1', h, width, filter_size=[3]))
-            h = tf.nn.relu(Z.conv1d('l_2', h, width, filter_size=[1]))
-            h = Z.conv1d_zeros('l_last', h, n_out, filter_size=[3])
-        return h
+            z = tf.nn.relu(Z.conv1d('l_1', z, 3, channels_out))
+            z = tf.nn.relu(Z.conv1d('l_2', z, 1, channels_out))
+            z = Z.conv1d('l_last', z, 3, original_channels, initializer=tf.zeros_initializer())
+            return z
 
     def _create_prior(self, z):
         '''Create a Gaussian object that makes the shape of z.'''
