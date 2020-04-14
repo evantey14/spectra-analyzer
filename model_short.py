@@ -113,54 +113,19 @@ class model:
     def _flow_step(self, name, z, logdet):
         with tf.compat.v1.variable_scope(name):
             z, logdet = Z.actnorm('actnorm', z, logdet)
-            z, logdet = self._invertible_1x1_conv('invconv', z, logdet, reverse=False)
+            z, logdet = Z.invertible_1x1_conv('invconv', z, logdet, reverse=False)
             z1, z2 = Z.split(z)
-            z2 += self._f('f', z1, self.hps.width)
+            z2 += Z.f('f', z1, self.hps.width)
             z = Z.unsplit(z1, z2)
             return z, logdet
 
     def _reverse_flow_step(self, name, z):
         with tf.compat.v1.variable_scope(name):
             z1, z2 = Z.split(z)
-            z2 -= self._f('f', z1, self.hps.width)
+            z2 -= Z.f('f', z1, self.hps.width)
             z = Z.unsplit(z1, z2)
-            z, _ = self._invertible_1x1_conv('invconv', z, 0, reverse=True)
+            z, _ = Z.invertible_1x1_conv('invconv', z, 0, reverse=True)
             z = Z.actnorm_reverse('actnorm', z)
-            return z
-
-    # move to tfops
-    def _invertible_1x1_conv(self, name, z, logdet, reverse=False):
-        with tf.compat.v1.variable_scope(name):
-            batch_size, length, n_channels = Z.int_shape(z)
-            w_shape = [n_channels, n_channels]
-
-            # Sample a random orthogonal matrix:
-            w_init = np.linalg.qr(np.random.randn(*w_shape))[0].astype('float32')
-            w = tf.compat.v1.get_variable('W', dtype=tf.float32, initializer=w_init)
-
-            #dlogdet = tf.linalg.LinearOperator(w).log_abs_determinant() * length
-            dlogdet = tf.cast(tf.math.log(abs(tf.linalg.det(tf.cast(w, 'float64')))), 'float32') * length
-
-            if not reverse:
-                _w = tf.reshape(w, [1] + w_shape)
-                #z = tf.nn.conv1d(z, _w, [1, 1, 1], 'SAME')
-                z = tf.nn.conv1d(z, _w, 1, 'SAME')
-                logdet += dlogdet
-            else:
-                _w = tf.reshape(tf.matrix_inverse(w), [1]+w_shape)
-                #z = tf.nn.conv1d(z, _w, [1, 1, 1], 'SAME')
-                z = tf.nn.conv1d(z, _w, 1, 'SAME')
-                logdet -= dlogdet
-
-            return z, logdet
-
-    # move to tfops
-    def _f(self, name, z, channels_out):
-        original_channels = int(z.get_shape()[2])
-        with tf.compat.v1.variable_scope(name):
-            z = tf.nn.relu(Z.conv1d('l_1', z, 3, channels_out))
-            z = tf.nn.relu(Z.conv1d('l_2', z, 1, channels_out))
-            z = Z.conv1d('l_last', z, 3, original_channels, initializer=tf.zeros_initializer())
             return z
 
     def _create_prior(self, z):
