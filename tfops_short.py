@@ -28,16 +28,16 @@ def get_variable_ddi(name, shape, initial_value, dtype=tf.float32, init=False, t
 
 # Activation normalization
 @add_arg_scope
-def actnorm(name, x, scale=1., logdet=None, hps=None, logscale_factor=1., batch_variance=False, reverse=False, init=False, trainable=True): #changed logscalefactor to 1?
+def actnorm(name, x, scale=1., logdet=None, logscale_factor=1., batch_variance=False, reverse=False, init=False, trainable=True): #changed logscalefactor to 1?
     if arg_scope([get_variable_ddi], trainable=trainable):
         if not reverse:
             x = actnorm_center(name+"_center", x, reverse)
-            x = actnorm_scale(name+"_scale", x, scale, logdet, hps,
+            x = actnorm_scale(name+"_scale", x, scale, logdet,
                               logscale_factor, batch_variance, reverse, init)
             if logdet != None:
                 x, logdet = x
         else:
-            x = actnorm_scale(name + "_scale", x, scale, logdet, hps,
+            x = actnorm_scale(name + "_scale", x, scale, logdet,
                               logscale_factor, batch_variance, reverse, init)
             if logdet != None:
                 x, logdet = x
@@ -59,7 +59,7 @@ def actnorm_center(name, x, reverse=False):
 
 @add_arg_scope
 def actnorm_scale(
-    name, x, scale=1., logdet=None, hps=None, logscale_factor=3., batch_variance=False, reverse=False, init=False, trainable=True
+    name, x, scale=1., logdet=None, logscale_factor=3., batch_variance=False, reverse=False, init=False, trainable=True
 ):
     with tf.compat.v1.variable_scope(name), arg_scope([get_variable_ddi], trainable=trainable):
         logdet_factor = int_shape(x)[1]
@@ -155,8 +155,7 @@ def gaussian_diag(mean, logsd):
         pass
     o.mean = mean
     o.logsd = logsd
-    o.eps = tf.random.normal(tf.shape(mean))
-    o.sample = mean + tf.exp(logsd) * o.eps
+    o.sample = lambda: mean + tf.exp(logsd) * tf.random.normal(tf.shape(o.mean))
     o.sample2 = lambda eps: mean + tf.exp(logsd) * eps
     o.logps = lambda x: -0.5 * \
         (np.log(2 * np.pi) + 2. * logsd + (x - mean) ** 2 / tf.exp(2. * logsd))

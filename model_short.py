@@ -2,225 +2,207 @@ import numpy as np
 import tensorflow as tf
 
 import tfops_short as Z
-import optim_short as optim
 
 class model:
     def __init__(self, sess, hps, train_iterator, data_init):
         # === Define session
         self.sess = sess
+        self.hps = hps
 
         # === Input tensors
         with tf.name_scope('input'):
-            self.input_placeholder = tf.compat.v1.placeholder(tf.float32, [None, hps.n_bins, 1],
-                                                              name='spectrum')
-            self.lr = tf.compat.v1.placeholder(tf.float32, None, name='learning_rate')
+            s_shape = [None, hps.n_bins, 1]
+            self.s_placeholder = tf.compat.v1.placeholder(tf.float32, s_shape, name='spectra')
+
+            self.lr_placeholder = tf.compat.v1.placeholder(tf.float32, None, name='learning_rate')
+
             self.train_iterator = train_iterator
-            self.z_placeholder = tf.compat.v1.placeholder(tf.float32, [None, hps.n_bins /
-                2**(hps.n_levels + 1), 4], name='latent_rep') # after squeeze & n_levels-1 splits
-            print(self.z_placeholder)
+
+            z_shape = [None, hps.n_bins/2**(hps.n_levels+1), 4]
+            self.z_placeholder = tf.compat.v1.placeholder(tf.float32, z_shape, name='latent_rep')
+
+            intermediate_z_shapes = [[None, hps.n_bins/2**(i+1), 2] for i in range(1, hps.n_levels)]
+            self.intermediate_z_placeholders = [
+                tf.compat.v1.placeholder(tf.float32, shape)
+                for shape in intermediate_z_shapes
+            ]
 
         # === Loss and optimizer
-        self.loss, self.stats = self.f_loss(self.train_iterator, hps)
-        train_op = tf.train.AdamOptimizer(learning_rate=self.lr).minimize(self.loss)
-        self.train = lambda _lr: self.sess.run([train_op, self.stats], {self.lr: _lr})[1]
+        self.optimizer, self.loss, self.stats = self._create_optimizer()
 
         # === Encoding and decoding
-        encode_op, _ = self._create_encoder(self.input_placeholder, hps)
-        self.encode = lambda spectra: self.sess.run(encode_op, {self.input_placeholder: spectra})
-        self.decoded_spectra = self._create_decoder(self.z_placeholder, hps)
-        self.decode = lambda z: self.sess.run(self.decoded_spectra, {self.z_placeholder: z})
-        reconstruct_op = self._create_decoder(encode_op, hps)
-        self.reconstruct = lambda spectra: self.sess.run(reconstruct_op, {self.input_placeholder: spectra})
+        self.z, self.logpx, self.intermediate_zs = self._create_encoder(self.s_placeholder)
+        self.s = self._create_decoder(self.z_placeholder)
+        self.s_from_intermediate_zs = self._create_decoder(self.z_placeholder,
+                                                          self.intermediate_z_placeholders)
 
         # === Initialize
-        # not sure if more initialization is needed?
-        sess.run(tf.compat.v1.global_variables_initializer())
+        sess.run(tf.compat.v1.global_variables_initializer()) # not sure if more initialization is needed?
 
         # === Saving and restoring
-        # not entirely sure what this does / if it works
         with tf.device('/cpu:0'):
             saver = tf.compat.v1.train.Saver()
             self.save = lambda path: saver.save(sess, path, write_meta_graph=False)
             self.restore = lambda path: saver.restore(sess, path)
 
-    def _create_encoder(self, x, hps):
+    def _create_optimizer(self):
+        '''Set up optimizer to train on input train_iterator and learning rate.'''
+        _, logpx, _ = self._create_encoder(self.train_iterator)
+        bits_x = -logpx / (np.log(2.) * self.hps.n_bins)  # bits per subpixel
+
+        with tf.compat.v1.variable_scope('optimizer', reuse=tf.compat.v1.AUTO_REUSE):
+            loss = tf.reduce_mean(bits_x)
+            stats = tf.stack([tf.reduce_mean(loss)])
+            optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder).minimize(loss)
+
+        return optimizer, loss, stats
+
+    def _create_encoder(self, x):
         '''Set up encoder tensors to pipe input spectra x to a latent representation
 
         Args:
             x: input tensor with shape [?, n_bins, 1], either a placeholder or data stream
-            hps: a config class
 
         Returns:
             z: output tensor, contains the fully compressed latent representation
             logpx: tensor with shape [?,], the log likelihood of each spectrum
+            intermediate_zs: list of tensors, the components dropped after splits
         '''
-        # Preprocess input x and set up log probability tensor where we'll accumulate log p(x) as x
-        # gets transformed through the network.
-        z = x - .5
-        z = Z.squeeze(z, 4)
-        logpx = tf.zeros_like(x, dtype='float32')[:, 0, 0]
+        logpx = tf.zeros_like(x, dtype='float32')[:, 0, 0] # zeros tensor with shape (batch_size)
+        intermediate_zs = []
+        z = Z.squeeze(x - .5, 4) # preprocess the input
         with tf.compat.v1.variable_scope('model', reuse=tf.compat.v1.AUTO_REUSE):
-            # Compress latent representations with revnets and splits
-            for i in range(hps.n_levels):
-                z, logpx = revnet2d('revnet' + str(i), z, logpx, hps)
-                if i < hps.n_levels - 1:
-                    z, logpx, _ = split1d('pool' + str(i), z, logpx)
+            for i in range(self.hps.n_levels):
+                for j in range(self.hps.depth):
+                    z, logpx = self._flow_step('flow-level{}-depth{}'.format(i, j), z, logpx)
+                if i < self.hps.n_levels - 1:
+                    z1, z2 = self._split(z)
+                    intermediate_prior = self._create_prior(z2)
+                    logpx += intermediate_prior.logp(z2)
+                    intermediate_zs.append(z2)
+                    z = Z.squeeze(z1, 2)
+            prior = self._create_prior(z)
+            logpx += prior.logp(z)
+            return z, logpx, intermediate_zs
 
-            # Compute the prior on the final latent representation.
-            hps.top_shape = Z.int_shape(z)[1:]
-            logp, _, _ = prior('prior', z)
-            logpx += logp(z)
-            return z, logpx
+    def _create_decoder(self, z, intermediate_zs=None):
+        '''Set up decoder tensors to generate spectra from latent representation.
 
-    def _create_decoder(self, z, hps):
-        ''' Set up decoder tensors fo generate spectra from latent representation.
-        
         Args:
             z: tensor where shape matches final latent representation.
-            hps: a config class
+            intermediate_zs: optional list of tensors, components removed during encoder splits.
 
         Returns:
-            x: tensor with shape [?, n_bins, 1]
+            x: tensor with shape [?, n_bins, 1], spectra constructed from z.
         '''
         with tf.compat.v1.variable_scope('model', reuse=tf.compat.v1.AUTO_REUSE):
-            for i in reversed(range(hps.n_levels)):
-                if i < hps.n_levels - 1:
-                    z = split1d_reverse('pool' + str(i), z)
-                z, _ = revnet2d('revnet' + str(i), z, 0, hps, reverse=True)
-        z = Z.unsqueeze(z, 4)
-        x = z + .5
-        return x
+            for i in reversed(range(self.hps.n_levels)):
+                if i < self.hps.n_levels - 1:
+                    z1 = Z.unsqueeze(z, 2)
+                    if intermediate_zs is None:
+                        intermediate_prior = self._create_prior(z1)
+                        z2 = intermediate_prior.sample()
+                    else:
+                        z2 = intermediate_zs[i]
+                    z = self._unsplit(z1, z2)
+                for j in reversed(range(self.hps.depth)):
+                    z, _= self._reverse_flow_step('flow-level{}-depth{}'.format(i, j), z)
+            x = Z.unsqueeze(z + .5, 4) # post-process spectra
+            return x
 
-    def f_loss(self, x, hps):
-        z, logpx = self._create_encoder(x, hps)
-        bits_x = -logpx / (np.log(2.) * int(x.get_shape()[1]) * int(x.get_shape()[2]))  # bits per subpixel
+    # move to tfops
+    def _split(self, z):
+        '''Split a (batch_size, length, n_channels) tensor in half across the channel dimension.'''
+        assert int(z.get_shape()[2]) == 4
+        return z[:, :, :2], z[:, :, 2:]
 
-        local_loss = bits_x
-        stats = tf.stack([tf.reduce_mean(local_loss)])
+    # move to tfops
+    def _unsplit(self, z1, z2):
+        '''Recombine two tensors across the channel dimension.'''
+        return tf.concat([z1, z2], 2)
 
-        return tf.reduce_mean(local_loss), stats
+    def _flow_step(self, name, z, logdet):
+        with tf.compat.v1.variable_scope(name):
+            z, logdet = Z.actnorm('actnorm', z, logdet=logdet, reverse=False)
+            z, logdet = self._invertible_1x1_conv('invconv', z, logdet, reverse=False)
+            z1, z2 = self._split(z)
+            z2 += self._f('f1', z1, self.hps.width)
+            z = self._unsplit(z1, z2)
+            return z, logdet
 
-def revnet2d(name, z, logdet, hps, reverse=False):
-    with tf.compat.v1.variable_scope(name):
-        if not reverse:
-            for i in range(hps.depth):
-                z, logdet = revnet2d_step('revnetstep'+str(i), z, logdet, hps, reverse)
-        else:
-            for i in reversed(range(hps.depth)):
-                z, logdet = revnet2d_step('revnetstep'+str(i), z, logdet, hps, reverse)
-    return z, logdet
+    def _reverse_flow_step(self, name, z):
+        with tf.compat.v1.variable_scope(name):
+            z1, z2 = self._split(z)
+            z2 -= self._f('f1', z1, self.hps.width)
+            z = self._unsplit(z1, z2)
+            z, logdet = self._invertible_1x1_conv('invconv', z, 0, reverse=True)
+            z, logdet = Z.actnorm('actnorm', z, logdet=0, reverse=True)
+            return z, logdet
 
-def revnet2d_step(name, z, logdet, hps, reverse):
-    with tf.compat.v1.variable_scope(name):
-        batch_size, length, n_channels = Z.int_shape(z)
-        assert n_channels % 2 == 0
-        if not reverse:
-            z, logdet = Z.actnorm('actnorm', z, logdet=logdet, hps=hps)
-            z, logdet = invertible_1x1_conv('invconv', z, logdet)
-            z1 = z[:, :, :n_channels // 2]
-            z2 = z[:, :, n_channels // 2:]
-            z2 += f('f1', z1, hps.width)
-            z = tf.concat([z1, z2], 2)
-        else:
-            z1 = z[:, :, :n_channels // 2]
-            z2 = z[:, :, n_channels // 2:]
-            z2 -= f('f1', z1, hps.width)
-            z = tf.concat([z1, z2], 2)
-            z, logdet = invertible_1x1_conv('invconv', z, logdet, reverse)
-            z, logdet = Z.actnorm('actnorm', z, logdet=logdet, reverse=reverse)
-            
-    return z, logdet
+    # move to tfops
+    def _invertible_1x1_conv(self, name, z, logdet, reverse=False):
+        with tf.compat.v1.variable_scope(name):
+            batch_size, length, n_channels = Z.int_shape(z)
+            w_shape = [n_channels, n_channels]
 
-def invertible_1x1_conv(name, z, logdet, reverse=False):
-    with tf.compat.v1.variable_scope(name):
-        batch_size, length, n_channels = Z.int_shape(z)
-        w_shape = [n_channels, n_channels]
+            # Sample a random orthogonal matrix:
+            w_init = np.linalg.qr(np.random.randn(*w_shape))[0].astype('float32')
+            w = tf.compat.v1.get_variable('W', dtype=tf.float32, initializer=w_init)
 
-        # Sample a random orthogonal matrix:
-        w_init = np.linalg.qr(np.random.randn(*w_shape))[0].astype('float32')
-        w = tf.compat.v1.get_variable('W', dtype=tf.float32, initializer=w_init)
+            #dlogdet = tf.linalg.LinearOperator(w).log_abs_determinant() * length
+            dlogdet = tf.cast(tf.math.log(abs(tf.linalg.det(tf.cast(w, 'float64')))), 'float32') * length
 
-        #dlogdet = tf.linalg.LinearOperator(w).log_abs_determinant() * length
-        dlogdet = tf.cast(tf.math.log(abs(tf.linalg.det(tf.cast(w, 'float64')))), 'float32') * length
+            if not reverse:
+                _w = tf.reshape(w, [1] + w_shape)
+                #z = tf.nn.conv1d(z, _w, [1, 1, 1], 'SAME')
+                z = tf.nn.conv1d(z, _w, 1, 'SAME')
+                logdet += dlogdet
+            else:
+                _w = tf.reshape(tf.matrix_inverse(w), [1]+w_shape)
+                #z = tf.nn.conv1d(z, _w, [1, 1, 1], 'SAME')
+                z = tf.nn.conv1d(z, _w, 1, 'SAME')
+                logdet -= dlogdet
 
-        if not reverse:
-            _w = tf.reshape(w, [1] + w_shape)
-            z = tf.nn.conv1d(z, _w, [1, 1, 1], 'SAME')
-            logdet += dlogdet
-        else:
-            _w = tf.reshape(tf.matrix_inverse(w), [1]+w_shape)
-            z = tf.nn.conv1d(z, _w, [1, 1, 1], 'SAME')
-            logdet -= dlogdet
-            
-        return z, logdet
-    
-def f(name, h, width, n_out=None):
-    n_out = n_out or int(h.get_shape()[2])
-    with tf.compat.v1.variable_scope(name):
-        h = tf.nn.relu(Z.conv1d('l_1', h, width, filter_size=[3]))
-        h = tf.nn.relu(Z.conv1d('l_2', h, width, filter_size=[1]))
-        h = Z.conv1d_zeros('l_last', h, n_out, filter_size=[3])
-    return h
+            return z, logdet
 
-def split1d(name, z, objective):
-    with tf.compat.v1.variable_scope(name):
-        n_z = Z.int_shape(z)[2]
-        z1 = z[:, :, :n_z // 2]
-        z2 = z[:, :, n_z // 2:]
-        pz = split1d_prior(z1)
-        objective += pz.logp(z2)
-        
-        z1 = Z.squeeze(z1, 2)
-        eps = pz.get_eps(z2)
-        return z1, objective, eps
-    
-def split1d_reverse(name, z, eps=None, eps_std=None):
-    with tf.variable_scope(name):
-        z1 = Z.unsqueeze(z, 2)
-        pz = split1d_prior(z1)
-        if eps is not None:
-            # Already sampled eps
-            z2 = pz.sample2(eps)
-        elif eps_std is not None:
-            # Sample with given eps_std
-            z2 = pz.sample2(pz.eps * tf.reshape(eps_std, [-1, 1, 1]))
-        else:
-            # Sample normally
-            z2 = pz.sample
-        z = tf.concat([z1, z2], 2)
-        return z
-    
-def split1d_prior(z):
-    # length, n_channels = Z.int_shape(z)[1:]
-    # h = Z.conv1d_zeros('conv', z, 2 * n_channels, filter_size=[3]) # again just for learning prior?
-    # mean = h[:, :, 0::2]
-    # logs = h[:, :, 1::2]
-    mean = tf.zeros_like(z, dtype='float32')
-    logs = tf.zeros_like(z, dtype='float32')
-    return Z.gaussian_diag(mean, logs)
+    # move to tfops
+    def _f(self, name, h, width, n_out=None):
+        n_out = n_out or int(h.get_shape()[2])
+        with tf.compat.v1.variable_scope(name):
+            h = tf.nn.relu(Z.conv1d('l_1', h, width, filter_size=[3]))
+            h = tf.nn.relu(Z.conv1d('l_2', h, width, filter_size=[1]))
+            h = Z.conv1d_zeros('l_last', h, n_out, filter_size=[3])
+        return h
 
-def prior(name, z):
-    with tf.compat.v1.variable_scope(name):
-        #length, n_channels = hps.top_shape
-        #h = tf.zeros([batch_size, length, 2 * n_channels])
-        #h = Z.conv1d_zeros('p', h, 2 * n_channels, filter_size=[3]) # for learning prior?
-        mean = tf.zeros_like(z, dtype='float32')
+    def _create_prior(self, z):
+        '''Create a Gaussian object that makes the shape of z.'''
+        mu = tf.zeros_like(z, dtype='float32')
         logs = tf.zeros_like(z, dtype='float32')
-        pz = Z.gaussian_diag(mean, logs)
+        return Z.gaussian_diag(mu, logs)
 
-    def logp(z1):
-        return pz.logp(z1)
+    def train(self, lr):
+        '''Run one training batch to optimize the network.
         
-    def sample(eps=None, eps_std=None):
-        if eps is not None: # Already sampled eps. Don't use eps_std
-            z = pz.sample2(eps)
-        elif eps_std is not None: # Sample with given eps_std
-            z = pz.sample2(pz.eps * tf.reshape(eps_std, [-1, 1, 1]))
-        else: # Sample normally
-            z = pz.sample
-        return z
+        Args:
+            lr: float, learning rate
 
-    def eps(z1):
-        return pz.get_eps(z1)
+        Returns:
+            stats: statistics created in _create_optimizer. probably contains loss.
+        '''
+        _, stats = self.sess.run([self.optimizer, self.stats], {self.lr_placeholder: lr})
+        return stats
 
-    return logp, sample, eps
+    def encode(self, s):
+        return self.sess.run([self.z, self.intermediate_zs], {self.s_placeholder: s})
+
+    def decode(self, z, intermediate_zs=None):
+        feed_dict = {self.z_placeholder: z}
+        if intermediate_zs is None:
+            return self.sess.run(self.s, feed_dict)
+        else:
+            for i in range(len(intermediate_zs)):
+                feed_dict[self.intermediate_z_placeholders[i]] = intermediate_zs[i]
+            return self.sess.run(self.s_from_intermediate_zs, feed_dict)
+
+    def get_likelihood(self, s):
+        return self.sess.run(self.logpx, {self.s_placeholder: s})
