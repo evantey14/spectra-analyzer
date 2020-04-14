@@ -129,16 +129,13 @@ class model:
             return z
 
     def _create_prior(self, z):
-        '''Create a Gaussian object that makes the shape of z.'''
+        '''Create a unit normal Gaussian object with same shape as z.'''
         mu = tf.zeros_like(z, dtype='float32')
         logs = tf.zeros_like(z, dtype='float32')
         return Z.gaussian_diag(mu, logs)
 
     def train(self, lr):
-        '''Run one training batch to optimize the network.
-        
-        Args:
-            lr: float, learning rate
+        '''Run one training batch to optimize the network with learning rate lr.
 
         Returns:
             stats: statistics created in _create_optimizer. probably contains loss.
@@ -150,6 +147,12 @@ class model:
         return self.sess.run([self.z, self.intermediate_zs], {self.s_placeholder: s})
 
     def decode(self, z, intermediate_zs=None):
+        '''Decode a latent representation with optional intermediate components.
+
+        Returns:
+            spectra, from z and intermediate zs. If no intermediate zs are provided, sample them
+            randomly from unit normal distributions.
+        '''
         feed_dict = {self.z_placeholder: z}
         if intermediate_zs is None:
             return self.sess.run(self.s, feed_dict)
