@@ -1,7 +1,7 @@
 import numpy as np
 import tensorflow as tf
 
-import tfops_short as Z
+import tfops as Z
 
 class model:
     def __init__(self, sess, hps, train_iterator, data_init):
@@ -18,10 +18,10 @@ class model:
 
             self.train_iterator = train_iterator
 
-            z_shape = [None, hps.n_bins/2**(hps.n_levels+1), 4]
+            z_shape = [None, hps.n_bins//2**(hps.n_levels+1), 4]
             self.z_placeholder = tf.compat.v1.placeholder(tf.float32, z_shape, name='latent_rep')
 
-            intermediate_z_shapes = [[None, hps.n_bins/2**(i+1), 2] for i in range(1, hps.n_levels)]
+            intermediate_z_shapes = [[None, hps.n_bins//2**(i+1), 2] for i in range(1, hps.n_levels)]
             self.intermediate_z_placeholders = [
                 tf.compat.v1.placeholder(tf.float32, shape)
                 for shape in intermediate_z_shapes
@@ -53,7 +53,7 @@ class model:
         with tf.compat.v1.variable_scope('optimizer', reuse=tf.compat.v1.AUTO_REUSE):
             loss = tf.reduce_mean(bits_x)
             stats = tf.stack([tf.reduce_mean(loss)])
-            optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder).minimize(loss)
+            optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=self.lr_placeholder).minimize(loss)
 
         return optimizer, loss, stats
 

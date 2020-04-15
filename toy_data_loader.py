@@ -30,7 +30,7 @@ def create_data_loader(sess, batch_size, n_data, n_bins, sample_prior=_sample_de
     '''Create an iterator, initializer, and data_init for a toy dataset. Must be called in a valid tf session.'''
     data = np.array([_generate_spectrum(n_bins, *sample_prior()) for _ in range(n_data)])[:, :, np.newaxis]
     placeholder_data = tf.compat.v1.placeholder(tf.float32, [n_data, n_bins, 1])
-    dataset = tf.data.Dataset.from_tensor_slices(placeholder_data)
+    dataset = tf.compat.v1.data.Dataset.from_tensor_slices(placeholder_data)
     dataset = dataset.batch(batch_size)
     iterator = dataset.make_initializable_iterator()
     input_stream = iterator.get_next()

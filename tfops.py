@@ -2,8 +2,6 @@ import tensorflow as tf
 import numpy as np
 
 def int_shape(z): # should probably do something about this
-    if str(z.get_shape()[0]) != '?':
-        return list(map(int, z.get_shape()))
     return [-1]+list(map(int, z.get_shape()[1:]))
 
 # logs used to have a scale that was fixed to 3. I've removed it.
@@ -11,8 +9,8 @@ def actnorm(name, z, logdet):
     with tf.compat.v1.variable_scope(name):
         _, length, n_channels = int_shape(z)
         shape = (1, 1, n_channels)
-        b = tf.get_variable("b", shape, initializer=tf.zeros_initializer())
-        logs = tf.get_variable("logs", shape, initializer=tf.zeros_initializer())
+        b = tf.compat.v1.get_variable("b", shape, initializer=tf.zeros_initializer())
+        logs = tf.compat.v1.get_variable("logs", shape, initializer=tf.zeros_initializer())
         z += b
         z = z * tf.exp(logs)
         dlogdet = tf.reduce_sum(logs) * length
@@ -22,8 +20,8 @@ def actnorm_reverse(name, z):
     with tf.compat.v1.variable_scope(name):
         _, _, n_channels = int_shape(z)
         shape = (1, 1, n_channels)
-        b = tf.get_variable("b", shape, initializer=tf.zeros_initializer())
-        logs = tf.get_variable("logs", shape, initializer=tf.zeros_initializer())
+        b = tf.compat.v1.get_variable("b", shape, initializer=tf.zeros_initializer())
+        logs = tf.compat.v1.get_variable("logs", shape, initializer=tf.zeros_initializer())
         z = z * tf.exp(-logs)
         z -= b
         return z
@@ -66,7 +64,7 @@ def invertible_1x1_conv(name, z, logdet, reverse):
             z = tf.nn.conv1d(z, _w, 1, 'SAME')
             logdet += dlogdet
         else:
-            _w = tf.reshape(tf.matrix_inverse(w), [1]+w_shape)
+            _w = tf.reshape(tf.linalg.inv(w), [1]+w_shape)
             #z = tf.nn.conv1d(z, _w, [1, 1, 1], 'SAME')
             z = tf.nn.conv1d(z, _w, 1, 'SAME')
             logdet -= dlogdet
