@@ -73,7 +73,7 @@ wcwidth==0.1.7
 webencodings==0.5.1
 Werkzeug==0.15.2
 widgetsnbextension==3.4.2
-tensorflow-gpu==1.8.0
+tensorflow-gpu==1.15.2
 keras==2.2.0
 pillow==5.2.0
 toposort==1.5
