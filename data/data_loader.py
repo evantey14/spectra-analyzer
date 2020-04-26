@@ -2,7 +2,7 @@ import numpy as np
 import tensorflow as tf
 import tftables
 
-def _input_transform(tbl_batch):
+def input_transform(tbl_batch):
     '''Define a transformation from table to batched data tensor.'''
     data = tbl_batch["spectrum"]
     mh_ratio, alpham_ratio = tbl_batch["MH_ratio"], tbl_batch["alphaM_ratio"]
@@ -17,12 +17,10 @@ def _input_transform(tbl_batch):
     metals = tf.stack([mh_ratio_float, alpham_ratio_float], axis=1)
     return reshaped_normalized_data, metals
 
-def create_data_loader(sess, batch_size, n_data, n_bins, filename="/mnt/raid0/gabrielc/sample_8k.h5"):
-    assert n_bins == 40000
-    assert n_data == 8000
+def create_loader_from_hdf5(sess, batch_size, filename):
     loader = tftables.load_dataset(filename=filename,
                                    dataset_path="/spectra",
-                                   input_transform=_input_transform,
+                                   input_transform=input_transform,
                                    batch_size=batch_size,
                                    cyclic=True,
                                    ordered=True)
@@ -34,5 +32,18 @@ def create_data_loader(sess, batch_size, n_data, n_bins, filename="/mnt/raid0/ga
         pass
 
     loader.start(sess)
-    data_init = sess.run(data_stream)
-    return data_stream, initialize_input_stream, data_init 
+    return data_stream, initialize_input_stream
+
+def create_loader_from_array(sess, batch_size, data):
+    '''Create an iterator and initializer from a data array with shape [n_data, n-bins].'''
+    n_data, n_bins = data.shape
+    placeholder_data = tf.compat.v1.placeholder(tf.float32, [n_data, n_bins, 1])
+    dataset = tf.compat.v1.data.Dataset.from_tensor_slices(placeholder_data)
+    dataset = dataset.batch(batch_size)
+    iterator = dataset.make_initializable_iterator()
+    input_stream = iterator.get_next()
+
+    def initialize_input_stream():
+        sess.run(iterator.initializer, feed_dict={placeholder_data: data[:, :, np.newaxis]})
+
+    return iterator.get_next(), initialize_input_stream
