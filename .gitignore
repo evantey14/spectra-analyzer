@@ -1,3 +1,6 @@
+*.npz
+*.h5
+*.swp
 output/
 __pycache__/
 .ipynb_checkpoints/
