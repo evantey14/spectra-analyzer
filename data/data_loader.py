@@ -9,7 +9,7 @@ def input_transform(tbl_batch):
     data_float = tf.to_float(data)
     mh_ratio_float, alpham_ratio_float = tf.to_float(mh_ratio), tf.to_float(alpham_ratio)
 
-    data_slice = data_float[:, 700000:740000] # section chosen by hand because it has features in it
+    data_slice = data_float
     data_max = tf.reduce_max(data_slice, axis=1)
     normalized_data = tf.divide(data_slice, tf.expand_dims(data_max, axis=1))
     reshaped_normalized_data = tf.expand_dims(normalized_data, 2) # add a channel dimension
