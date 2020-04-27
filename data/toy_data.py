@@ -26,8 +26,7 @@ def sample_default_prior():
     return T, A, mu, sigma
 
 def generate_spectra(n_data, n_bins):
-    '''Generate data with shape [n_data, n_bins, 1]'''
-    return np.array([
-        generate_spectrum(n_bins, *sample_default_prior()) 
-        for _ in range(n_data)
-    ])
+    '''Generate data with shape [n_data, n_bins, 1].'''
+    labels = np.array([sample_default_prior() for _ in range(n_data)])
+    spectra = np.array([generate_spectrum(n_bins, *label) for label in labels])
+    return spectra, labels
