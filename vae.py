@@ -54,16 +54,14 @@ class VariationalAutoencoder:
             self._create_encoder()
 
             latent_representation_size = self.network_architecture["latent_representation_size"]
-            self.latent_mean = self.encoder["layers"][-1][:, :latent_representation_size] 
-            self.latent_sigma = self.encoder["layers"][-1][:, latent_representation_size:]
+            self.latent_mean = self.encoder["layers"][-1][:, :latent_representation_size]
+            self.latent_sigma = tf.exp(self.encoder["layers"][-1][:, latent_representation_size:])
             eps = tf.compat.v1.random_normal((self.batch_size, latent_representation_size), 0, 1)
             self.latent_representation = self.latent_mean + eps * self.latent_sigma
 
             self._create_decoder()
 
-            maxes = tf.reduce_max(self.decoder["layers"][-1], axis=1)
-            self.reconstruction = tf.divide(self.decoder["layers"][-1],
-                                            tf.expand_dims(maxes, axis=1))
+            self.reconstruction = self.decoder["layers"][-1]
 
         with tf.compat.v1.variable_scope("label_predictor", reuse=tf.compat.v1.AUTO_REUSE):
             self._create_label_predictor()
@@ -75,8 +73,10 @@ class VariationalAutoencoder:
 
         first_layer = self.input
         encoder_layer_sizes = self.network_architecture["encoder_layer_sizes"]
+        activation_fns = [tf.nn.relu] * len(encoder_layer_sizes)
+        activation_fns[-1] = lambda x: x # linear activation for final layer
         weights, biases, layers = self._generate_layers_from_architecture(
-            "encoder", first_layer, encoder_layer_sizes, tf.nn.relu
+            "encoder", first_layer, encoder_layer_sizes, activation_fns
         )
 
         encoder["weights"], encoder["biases"], encoder["layers"] = weights, biases, layers
@@ -87,8 +87,10 @@ class VariationalAutoencoder:
     
         first_layer = self.latent_representation
         decoder_layer_sizes = self.network_architecture["decoder_layer_sizes"]
+        activation_fns = [tf.nn.relu] * len(decoder_layer_sizes)
+        activation_fns[-1] = tf.nn.sigmoid
         weights, biases, layers = self._generate_layers_from_architecture(
-            "decoder", first_layer, decoder_layer_sizes, tf.nn.relu
+            "decoder", first_layer, decoder_layer_sizes, activation_fns
         )
 
         decoder["weights"], decoder["biases"], decoder["layers"] = weights, biases, layers
@@ -99,8 +101,11 @@ class VariationalAutoencoder:
 
         first_layer = self.latent_representation
         label_predictor_layer_sizes = self.network_architecture["label_predictor_layer_sizes"]
+        activation_fns = [tf.nn.relu] * len(label_predictor_layer_sizes)
+        activation_fns[-1] = tf.nn.tanh
+
         weights, biases, layers = self._generate_layers_from_architecture(
-            "label_predictor", first_layer, label_predictor_layer_sizes, tf.nn.tanh
+            "label_predictor", first_layer, label_predictor_layer_sizes, activation_fns
         )
 
         label_predictor["weights"] = weights
@@ -109,14 +114,14 @@ class VariationalAutoencoder:
 
         self.label_predictor = label_predictor
 
-    def _generate_layers_from_architecture(self, name, first_layer, layer_sizes, activation_fn):
+    def _generate_layers_from_architecture(self, name, first_layer, layer_sizes, activation_fns):
         """Generate weight, bias, and layer tensors given a list of layer sizes.
 
         Args:
             name: str, what the variables should be named
             first_layer: Tensor, the first layer in the architecture 
             layer_sizes: [int], indicating the size of each fully connected layer
-            activation_fn: function, activation function for each neuron
+            activation_fns: [function], activation functions for each neuron
 
         Returns:
             weights, biases, layers. lists of Tensors.
@@ -135,7 +140,7 @@ class VariationalAutoencoder:
             biases.append(tf.compat.v1.get_variable("{}-bias-{}".format(name, i), shape=(n_out),
                                                     dtype=tf.float32,
                                                     initializer=tf.zeros_initializer))
-            layers.append(activation_fn(tf.matmul(previous_layer, weights[-1]) + biases[-1]))
+            layers.append(activation_fns[i](tf.matmul(previous_layer, weights[-1]) + biases[-1]))
         return weights, biases, layers 
 
     def _create_optimizers(self):
@@ -185,11 +190,14 @@ class VariationalAutoencoder:
         weights, biases = self.encoder["weights"], self.encoder["biases"]
 
         for i in range(len(weights)):
-            s = np.clip(weights[i].eval().T @ s + biases[i].eval(), 0, None)
+            if i == len(weights)-1:
+                s = weights[i].eval().T @ s + biases[i].eval()
+            else:
+                s = np.clip(weights[i].eval().T @ s + biases[i].eval(), 0, None)
 
         latent_representation_size = self.network_architecture["latent_representation_size"]
         latent_representation = np.random.normal(s[:latent_representation_size],
-                                                 s[latent_representation_size:],
+                                                 np.exp(s[latent_representation_size:]),
                                                  (latent_representation_size,))
         return latent_representation
 
@@ -199,9 +207,11 @@ class VariationalAutoencoder:
         weights, biases = self.decoder["weights"], self.decoder["biases"]
 
         for i in range(len(self.decoder["weights"])):
-            s = np.clip(weights[i].eval().T @ s + biases[i].eval(), 0, None)
-
-        return s / np.max(s)
+            if i == len(weights) - 1:
+                s = 1 / (1 + np.exp(-(weights[i].eval().T @ s + biases[i].eval())))
+            else:
+                s = np.clip(weights[i].eval().T @ s + biases[i].eval(), 0, None)
+        return s
 
     def reconstruct(self, spectrum):
         """Reconstruct spectrum."""
