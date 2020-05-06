@@ -2,20 +2,37 @@ import numpy as np
 import tensorflow as tf
 import tftables
 
+def add_noise(spectra):
+    '''Add counting noise to a spectra batch.'''
+    shape = tf.shape(spectra)
+    sqrt = tf.sqrt(spectra)
+    sums = tf.reduce_sum(spectra, axis=1)
+    sqrtsums = tf.reduce_sum(sqrt, axis=1)
+    As = .02 * sums / (np.sqrt(2 / 3.14) * sqrtsums)
+    expanded_As = tf.repeat(tf.expand_dims(As, axis=1), repeats=shape[1], axis=1)
+    noise = tf.random.normal(shape, stddev=expanded_As) * sqrt
+    return spectra + noise
+
+def normalize(spectra):
+    '''Normalize each spectra by its largest value.'''
+    spectra_max = tf.reduce_max(spectra, axis=1)
+    normalized_spectra = tf.divide(spectra, tf.expand_dims(spectra_max, axis=1))
+    return normalized_spectra
+
 def input_transform(tbl_batch):
     '''Define a transformation from table to batched data tensor.'''
     data = tbl_batch["spectrum"]
     mh_ratio, alpham_ratio = tbl_batch["MH_ratio"], tbl_batch["alphaM_ratio"]
-    data_float = tf.to_float(data)
-    mh_ratio_float, alpham_ratio_float = tf.to_float(mh_ratio), tf.to_float(alpham_ratio)
+    data_float = tf.cast(data, dtype=tf.float32)
+    mh_ratio_float = tf.cast(mh_ratio, dtype=tf.float32)
+    alpham_ratio_float = tf.cast(alpham_ratio, dtype=tf.float32)
 
-    data_slice = data_float
-    data_max = tf.reduce_max(data_slice, axis=1)
-    normalized_data = tf.divide(data_slice, tf.expand_dims(data_max, axis=1))
-    reshaped_normalized_data = tf.expand_dims(normalized_data, 2) # add a channel dimension
+    noisy_data = add_noise(data_float)
+    normalized_data = normalize(noisy_data)
+    reshaped_data = tf.expand_dims(normalized_data, 2) # add a channel dimension
 
-    metals = tf.stack([mh_ratio_float, alpham_ratio_float], axis=1)
-    return reshaped_normalized_data, metals
+    labels = tf.stack([mh_ratio_float, alpham_ratio_float], axis=1)
+    return reshaped_data, labels
 
 def create_loader_from_hdf5(sess, batch_size, filename):
     loader = tftables.load_dataset(filename=filename,
