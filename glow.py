@@ -4,7 +4,7 @@ import tensorflow as tf
 import tfops as Z
 
 class model:
-    def __init__(self, sess, hps, train_iterator, data_init):
+    def __init__(self, sess, hps, train_iterator):
         # === Define session
         self.sess = sess
         self.hps = hps
