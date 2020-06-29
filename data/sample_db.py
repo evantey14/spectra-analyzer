@@ -25,7 +25,7 @@ if __name__ == '__main__':
     import random
     random.shuffle(fits_fnames)
 
-    sample_size = 16000
+    sample_size = 1000
     sample_fnames = fits_fnames[:2*sample_size]
 
     out_file = tb.open_file(out_filename, 'w')
