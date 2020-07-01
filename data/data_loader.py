@@ -9,8 +9,9 @@ def add_noise(spectra):
     sums = tf.reduce_sum(spectra, axis=1)
     sqrtsums = tf.reduce_sum(sqrt, axis=1)
     As = .02 * sums / (np.sqrt(2 / 3.14) * sqrtsums)
-    expanded_As = tf.repeat(tf.expand_dims(As, axis=1), repeats=shape[1], axis=1)
-    noise = tf.random.normal(shape, stddev=expanded_As) * sqrt
+    expanded_As = tf.tile(As, [shape[1]])
+    reshaped_As = tf.reshape(expanded_As, [shape[0], shape[1]])
+    noise = tf.random.normal(shape, stddev=reshaped_As) * sqrt
     return spectra + noise
 
 def normalize(spectra):
