@@ -53,6 +53,7 @@ class model:
             previous_shape = hps.level_shapes[-1]
             hps.intermediate_z_shapes.append((previous_shape[0], 2))
             hps.level_shapes.append((previous_shape[0] // 2, 4))
+        hps.latent_rep_shape = hps.level_shapes[-1]
         self.print_short_description()
 
     def _create_optimizer(self):
