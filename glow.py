@@ -45,6 +45,16 @@ class model:
             self.save = lambda path: saver.save(sess, path, write_meta_graph=False)
             self.restore = lambda path: saver.restore(sess, path)
 
+        # === Description
+        hps.spectra_shape = (hps.n_bins, 1)
+        hps.level_shapes = [(hps.n_bins // 4, 4)]
+        hps.intermediate_z_shapes = []
+        for i in range(hps.n_levels - 1):
+            previous_shape = hps.level_shapes[-1]
+            hps.intermediate_z_shapes.append((previous_shape[0], 2))
+            hps.level_shapes.append((previous_shape[0] // 2, 4))
+        self.print_short_description()
+
     def _create_optimizer(self):
         '''Set up optimizer to train on input train_iterator and learning rate.'''
         _, logpx, _ = self._create_encoder(self.train_iterator)
@@ -163,3 +173,28 @@ class model:
 
     def get_likelihood(self, s):
         return self.sess.run(self.logpx, {self.s_placeholder: s})
+
+    def print_short_description(self):
+        print(" in:", self.hps.spectra_shape)
+        for i in range(self.hps.n_levels - 1):
+            print("l{:2}:".format(i), self.hps.level_shapes[i], ">", self.hps.intermediate_z_shapes[i])
+        print("l{:2}:".format(self.hps.n_levels - 1), self.hps.level_shapes[-1])
+        print("fin:", self.hps.level_shapes[-1])
+
+    def print_full_description(self):
+        print("Input spectra shapes:", self.hps.spectra_shape)
+        print("Initially squeeze to", self.hps.level_shapes[0])
+        for i in range(self.hps.n_levels - 1):
+            print("l{:2}:".format(i), "\t", self.hps.level_shapes[i])
+            print("\t   v")
+            print("\t", self.hps.depth, "flow steps")
+            print("\t   v")
+            print("\t split -> int rep:", self.hps.intermediate_z_shapes[i])
+            print("\t   v")
+            print("\t squeeze:", self.hps.intermediate_z_shapes[i], ">", self.hps.level_shapes[i+1])
+            print("\t   v")
+        print("l{:2}:".format(self.hps.n_levels - 1), "\t", self.hps.level_shapes[-1])
+        print("\t   v")
+        print("\t", self.hps.depth, "flow steps")
+        print("\t   v")
+        print("fin rep:", self.hps.level_shapes[-1])
