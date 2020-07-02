@@ -160,6 +160,11 @@ class model:
     def decode(self, z, intermediate_zs=None):
         '''Decode a latent representation with optional intermediate components.
 
+        Args:
+            z: latent representation with shape [?, *self.hps.latent_rep_shape]
+            intermediate_zs: list of intermediate zs. If a subset is provided (must be smaller
+                             intermediate zs), the rest are randomly sampled.
+
         Returns:
             spectra, from z and intermediate zs. If no intermediate zs are provided, sample them
             randomly from unit normal distributions.
@@ -168,8 +173,15 @@ class model:
         if intermediate_zs is None:
             return self.sess.run(self.s, feed_dict)
         else:
-            for i in range(len(intermediate_zs)):
-                feed_dict[self.intermediate_z_placeholders[i]] = intermediate_zs[i]
+            num_zs = len(self.hps.intermediate_z_shapes)
+            for i in range(num_zs):
+                if i < num_zs - len(intermediate_zs):
+                    sample_shape = (z.shape[0], *self.hps.intermediate_z_shapes[i])
+                    sample = np.random.normal(0, 1, sample_shape)
+                    feed_dict[self.intermediate_z_placeholders[i]] = sample
+                else:
+                    index = i - num_zs + len(intermediate_zs)
+                    feed_dict[self.intermediate_z_placeholders[i]] = intermediate_zs[index]
             return self.sess.run(self.s_from_intermediate_zs, feed_dict)
 
     def get_likelihood(self, s):
