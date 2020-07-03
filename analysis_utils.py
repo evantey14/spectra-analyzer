@@ -16,7 +16,7 @@ def plot_mean_w_error(data, axis=1, label=None):
     plt.fill_between(range(len(means)), means-stds, means+stds, alpha=.75)
 
 def plot_window(x, ys, labels=None, window=None, alpha=1):
-    w = window if window is not None else (0, len(l))
+    w = window if window is not None else (0, len(x))
     ls = labels if labels is not None else len(ys) * [None]
     for i in range(len(ys)):
         x_slice = x[w[0]:w[1]]
