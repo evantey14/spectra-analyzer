@@ -84,14 +84,17 @@ class model:
         z = Z.squeeze(x - .5, 4) # preprocess the input
         with tf.compat.v1.variable_scope('model', reuse=tf.compat.v1.AUTO_REUSE):
             for i in range(self.hps.n_levels):
-                for j in range(self.hps.depth):
-                    z, logpx = self._flow_step('flow-level{}-depth{}'.format(i, j), z, logpx)
                 if i < self.hps.n_levels - 1:
+                    for j in range(self.hps.depth):
+                        z, logpx = self._flow_step('flow-level{}-depth{}'.format(i, j), z, logpx)
                     z1, z2 = Z.split(z)
                     intermediate_prior = self._create_prior(z2)
                     logpx += intermediate_prior.logp(z2)
                     intermediate_zs.append(z2)
                     z = Z.squeeze(z1, 2)
+                elif i == self.hps.n_levels - 1:
+                    for j in range(self.hps.final_depth):
+                        z, logpx = self._flow_step('flow-level{}-depth{}'.format(i, j), z, logpx)
             prior = self._create_prior(z)
             logpx += prior.logp(z)
             return z, logpx, intermediate_zs
@@ -108,6 +111,9 @@ class model:
         '''
         with tf.compat.v1.variable_scope('model', reuse=tf.compat.v1.AUTO_REUSE):
             for i in reversed(range(self.hps.n_levels)):
+                if i == self.hps.n_levels - 1:
+                    for j in reversed(range(self.hps.final_depth)):
+                        z = self._reverse_flow_step('flow-level{}-depth{}'.format(i, j), z)
                 if i < self.hps.n_levels - 1:
                     z1 = Z.unsqueeze(z, 2)
                     if intermediate_zs is None:
@@ -116,8 +122,8 @@ class model:
                     else:
                         z2 = intermediate_zs[i]
                     z = Z.unsplit(z1, z2)
-                for j in reversed(range(self.hps.depth)):
-                    z = self._reverse_flow_step('flow-level{}-depth{}'.format(i, j), z)
+                    for j in reversed(range(self.hps.depth)):
+                        z = self._reverse_flow_step('flow-level{}-depth{}'.format(i, j), z)
             x = Z.unsqueeze(z + .5, 4) # post-process spectra
             return x
 
