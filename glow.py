@@ -81,7 +81,7 @@ class model:
         '''
         logpx = tf.zeros_like(x, dtype='float32')[:, 0, 0] # zeros tensor with shape (batch_size)
         intermediate_zs = []
-        z = Z.squeeze(x - .5, 4) # preprocess the input
+        z = Z.squeeze(x - .86, 4) # preprocess the input
         with tf.compat.v1.variable_scope('model', reuse=tf.compat.v1.AUTO_REUSE):
             for i in range(self.hps.n_levels):
                 if i < self.hps.n_levels - 1:
@@ -124,7 +124,7 @@ class model:
                     z = Z.unsplit(z1, z2)
                     for j in reversed(range(self.hps.depth)):
                         z = self._reverse_flow_step('flow-level{}-depth{}'.format(i, j), z)
-            x = Z.unsqueeze(z + .5, 4) # post-process spectra
+            x = Z.unsqueeze(z + .86, 4) # post-process spectra
             return x
 
     def _flow_step(self, name, z, logdet):
