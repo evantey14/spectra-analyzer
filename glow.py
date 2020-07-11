@@ -28,7 +28,7 @@ class model:
             ]
 
         # === Loss and optimizer
-        self.optimizer, self.loss, self.stats = self._create_optimizer()
+        self.training_op, self.training_ops, self.loss, self.stats = self._create_optimizer()
 
         # === Encoding and decoding
         self.z, self.logpx, self.intermediate_zs = self._create_encoder(self.s_placeholder)
@@ -64,9 +64,19 @@ class model:
         with tf.compat.v1.variable_scope('optimizer', reuse=tf.compat.v1.AUTO_REUSE):
             loss = tf.reduce_mean(bits_x)
             stats = tf.stack([tf.reduce_mean(loss)])
-            optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=self.lr_placeholder).minimize(loss)
+            optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=self.lr_placeholder)
 
-        return optimizer, loss, stats
+            training_op = optimizer.minimize(loss)
+
+            level_training_ops = []
+            for i in range(self.hps.n_levels):
+                scope = "model/level{}/".format(i)
+                level_vars = tf.compat.v1.get_collection(
+                    tf.compat.v1.GraphKeys.TRAINABLE_VARIABLES, scope=scope
+                )
+                level_training_ops.append(optimizer.minimize(loss, var_list=level_vars))
+
+        return training_op, level_training_ops, loss, stats
 
     def _create_encoder(self, x):
         '''Set up encoder tensors to pipe input spectra x to a latent representation
@@ -84,17 +94,18 @@ class model:
         z = Z.squeeze(x - .86, 4) # preprocess the input
         with tf.compat.v1.variable_scope('model', reuse=tf.compat.v1.AUTO_REUSE):
             for i in range(self.hps.n_levels):
-                if i < self.hps.n_levels - 1:
-                    for j in range(self.hps.depth):
-                        z, logpx = self._flow_step('flow-level{}-depth{}'.format(i, j), z, logpx)
-                    z1, z2 = Z.split(z)
-                    intermediate_prior = self._create_prior(z2)
-                    logpx += intermediate_prior.logp(z2)
-                    intermediate_zs.append(z2)
-                    z = Z.squeeze(z1, 2)
-                elif i == self.hps.n_levels - 1:
-                    for j in range(self.hps.final_depth):
-                        z, logpx = self._flow_step('flow-level{}-depth{}'.format(i, j), z, logpx)
+                with tf.compat.v1.variable_scope('level{}'.format(i)):
+                    if i < self.hps.n_levels - 1:
+                        for j in range(self.hps.depth):
+                            z, logpx = self._flow_step('depth{}'.format(j), z, logpx)
+                        z1, z2 = Z.split(z)
+                        intermediate_prior = self._create_prior(z2)
+                        logpx += intermediate_prior.logp(z2)
+                        intermediate_zs.append(z2)
+                        z = Z.squeeze(z1, 2)
+                    elif i == self.hps.n_levels - 1:
+                        for j in range(self.hps.final_depth):
+                            z, logpx = self._flow_step('depth{}'.format(i, j), z, logpx)
             prior = self._create_prior(z)
             logpx += prior.logp(z)
             return z, logpx, intermediate_zs
@@ -111,19 +122,20 @@ class model:
         '''
         with tf.compat.v1.variable_scope('model', reuse=tf.compat.v1.AUTO_REUSE):
             for i in reversed(range(self.hps.n_levels)):
-                if i == self.hps.n_levels - 1:
-                    for j in reversed(range(self.hps.final_depth)):
-                        z = self._reverse_flow_step('flow-level{}-depth{}'.format(i, j), z)
-                if i < self.hps.n_levels - 1:
-                    z1 = Z.unsqueeze(z, 2)
-                    if intermediate_zs is None:
-                        intermediate_prior = self._create_prior(z1)
-                        z2 = intermediate_prior.sample()
-                    else:
-                        z2 = intermediate_zs[i]
-                    z = Z.unsplit(z1, z2)
-                    for j in reversed(range(self.hps.depth)):
-                        z = self._reverse_flow_step('flow-level{}-depth{}'.format(i, j), z)
+                with tf.compat.v1.variable_scope('level{}'.format(i)):
+                    if i == self.hps.n_levels - 1:
+                        for j in reversed(range(self.hps.final_depth)):
+                            z = self._reverse_flow_step('depth{}'.format(j), z)
+                    elif i < self.hps.n_levels - 1:
+                        z1 = Z.unsqueeze(z, 2)
+                        if intermediate_zs is None:
+                            intermediate_prior = self._create_prior(z1)
+                            z2 = intermediate_prior.sample()
+                        else:
+                            z2 = intermediate_zs[i]
+                        z = Z.unsplit(z1, z2)
+                        for j in reversed(range(self.hps.depth)):
+                            z = self._reverse_flow_step('depth{}'.format(j), z)
             x = Z.unsqueeze(z + .86, 4) # post-process spectra
             return x
 
@@ -151,13 +163,14 @@ class model:
         logs = tf.zeros_like(z, dtype='float32')
         return Z.gaussian_diag(mu, logs)
 
-    def train(self, lr):
+    def train(self, lr, level=None):
         '''Run one training batch to optimize the network with learning rate lr.
 
         Returns:
             stats: statistics created in _create_optimizer. probably contains loss.
         '''
-        _, stats = self.sess.run([self.optimizer, self.stats], {self.lr_placeholder: lr})
+        training_op = self.training_op if level is None else self.training_ops[level]
+        _, stats = self.sess.run([training_op, self.stats], {self.lr_placeholder: lr})
         return stats
 
     def encode(self, s):
