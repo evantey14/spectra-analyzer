@@ -105,7 +105,7 @@ class model:
                         z = Z.squeeze(z1, 2)
                     elif i == self.hps.n_levels - 1:
                         for j in range(self.hps.final_depth):
-                            z, logpx = self._flow_step('depth{}'.format(i, j), z, logpx)
+                            z, logpx = self._flow_step('depth{}'.format(j), z, logpx)
             prior = self._create_prior(z)
             logpx += prior.logp(z)
             return z, logpx, intermediate_zs
