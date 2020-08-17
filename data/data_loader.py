@@ -15,24 +15,25 @@ def add_noise(spectra):
     return spectra + noise
 
 def normalize(spectra):
-    '''Normalize each spectra by its largest value.'''
-    spectra_max = tf.reduce_max(spectra, axis=1)
-    normalized_spectra = tf.divide(spectra, tf.expand_dims(spectra_max, axis=1))
-    return normalized_spectra
+    '''Normalize so spectra is zero mean unit variance.'''
+    return (spectra - 448561800000000.0) / 370311580000000.0 # 0 mean, 1 std
 
 def input_transform(tbl_batch):
     '''Define a transformation from table to batched data tensor.'''
     data = tbl_batch["spectrum"]
     mh_ratio, alpham_ratio = tbl_batch["MH_ratio"], tbl_batch["alphaM_ratio"]
+    t_eff, log_g = tbl_batch["T_eff"], tbl_batch["log_g"]
     data_float = tf.cast(data, dtype=tf.float32)
     mh_ratio_float = tf.cast(mh_ratio, dtype=tf.float32)
     alpham_ratio_float = tf.cast(alpham_ratio, dtype=tf.float32)
+    t_eff_float = tf.cast(t_eff, dtype=tf.float32)
+    log_g_float = tf.cast(log_g, dtype=tf.float32)
 
     noisy_data = add_noise(data_float)
     normalized_data = normalize(noisy_data)
     reshaped_data = tf.expand_dims(normalized_data, 2) # add a channel dimension
 
-    labels = tf.stack([mh_ratio_float, alpham_ratio_float], axis=1)
+    labels = tf.stack([t_eff_float, log_g_float, mh_ratio_float, alpham_ratio_float], axis=1)
     return reshaped_data, labels
 
 def create_loader_from_hdf5(sess, batch_size, filename):

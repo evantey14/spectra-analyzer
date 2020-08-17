@@ -32,7 +32,6 @@ class model:
 
         # === Encoding and decoding
         self.z, self.logpx, self.intermediate_zs = self._create_encoder(self.s_placeholder)
-        self.s = self._create_decoder(self.z_placeholder)
         self.s_from_intermediate_zs = self._create_decoder(self.z_placeholder,
                                                            self.intermediate_z_placeholders)
 
@@ -91,26 +90,23 @@ class model:
         '''
         logpx = tf.zeros_like(x, dtype='float32')[:, 0, 0] # zeros tensor with shape (batch_size)
         intermediate_zs = []
-        z = Z.squeeze(x - .86, 4) # preprocess the input
+        z = Z.squeeze(x, 4) # pre-process
         with tf.compat.v1.variable_scope('model', reuse=tf.compat.v1.AUTO_REUSE):
             for i in range(self.hps.n_levels):
                 with tf.compat.v1.variable_scope('level{}'.format(i)):
+                    for j in range(self.hps.level_depths[i]):
+                        z, logpx = self._flow_step('depth{}'.format(j), z, logpx)
                     if i < self.hps.n_levels - 1:
-                        for j in range(self.hps.depth):
-                            z, logpx = self._flow_step('depth{}'.format(j), z, logpx)
                         z1, z2 = Z.split(z)
                         intermediate_prior = self._create_prior(z2)
                         logpx += intermediate_prior.logp(z2)
                         intermediate_zs.append(z2)
                         z = Z.squeeze(z1, 2)
-                    elif i == self.hps.n_levels - 1:
-                        for j in range(self.hps.final_depth):
-                            z, logpx = self._flow_step('depth{}'.format(j), z, logpx)
             prior = self._create_prior(z)
             logpx += prior.logp(z)
             return z, logpx, intermediate_zs
 
-    def _create_decoder(self, z, intermediate_zs=None):
+    def _create_decoder(self, z, intermediate_zs):
         '''Set up decoder tensors to generate spectra from latent representation.
 
         Args:
@@ -123,20 +119,13 @@ class model:
         with tf.compat.v1.variable_scope('model', reuse=tf.compat.v1.AUTO_REUSE):
             for i in reversed(range(self.hps.n_levels)):
                 with tf.compat.v1.variable_scope('level{}'.format(i)):
-                    if i == self.hps.n_levels - 1:
-                        for j in reversed(range(self.hps.final_depth)):
-                            z = self._reverse_flow_step('depth{}'.format(j), z)
-                    elif i < self.hps.n_levels - 1:
+                    if i < self.hps.n_levels - 1:
                         z1 = Z.unsqueeze(z, 2)
-                        if intermediate_zs is None:
-                            intermediate_prior = self._create_prior(z1)
-                            z2 = intermediate_prior.sample()
-                        else:
-                            z2 = intermediate_zs[i]
+                        z2 = intermediate_zs[i]
                         z = Z.unsplit(z1, z2)
-                        for j in reversed(range(self.hps.depth)):
-                            z = self._reverse_flow_step('depth{}'.format(j), z)
-            x = Z.unsqueeze(z + .86, 4) # post-process spectra
+                    for j in reversed(range(self.hps.level_depths[i])):
+                        z = self._reverse_flow_step('depth{}'.format(j), z)
+            x = Z.unsqueeze(z, 4) # post-process
             return x
 
     def _flow_step(self, name, z, logdet):
@@ -144,14 +133,14 @@ class model:
             z, logdet = Z.actnorm('actnorm', z, logdet)
             z, logdet = Z.invertible_1x1_conv('invconv', z, logdet, reverse=False)
             z1, z2 = Z.split(z)
-            z2 += Z.f('f', z1, self.hps.width)
+            z2 += Z.f('f', z1, self.hps.window_size, self.hps.width)
             z = Z.unsplit(z1, z2)
             return z, logdet
 
     def _reverse_flow_step(self, name, z):
         with tf.compat.v1.variable_scope(name):
             z1, z2 = Z.split(z)
-            z2 -= Z.f('f', z1, self.hps.width)
+            z2 -= Z.f('f', z1, self.hps.window_size, self.hps.width)
             z = Z.unsplit(z1, z2)
             z, _ = Z.invertible_1x1_conv('invconv', z, 0, reverse=True)
             z = Z.actnorm_reverse('actnorm', z)
@@ -162,6 +151,48 @@ class model:
         mu = tf.zeros_like(z, dtype='float32')
         logs = tf.zeros_like(z, dtype='float32')
         return Z.gaussian_diag(mu, logs)
+
+    def create_peak_remover(self, window, original):
+        # setup
+        original_left, original_right = original[:, :window[0]], original[:, window[1]:]
+        left, mid, right = (
+            self.s_from_intermediate_zs[:, :window[0]],
+            self.s_from_intermediate_zs[:, window[0]:window[1]],
+            self.s_from_intermediate_zs[:, window[1]:],
+        )
+        gaussian_kernel = Z.create_gaussian_kernel(size=29, mean=0, std=7)
+        derivative_kernel = tf.constant([[[-self.hps.n_bins / 2]], [[0]], [[self.hps.n_bins / 2]]])
+
+        # outside window
+        left_squared_error = tf.reduce_sum((left - original_left)**2)
+        right_squared_error = tf.reduce_sum((right - original_right)**2)
+        outside_cost = left_squared_error + right_squared_error
+
+        # inside window
+        smooth = tf.nn.conv1d(mid, gaussian_kernel, padding="SAME")
+        first_derivative = tf.nn.conv1d(smooth, derivative_kernel, padding="SAME")
+        smooth_first_derivative = tf.nn.conv1d(first_derivative, gaussian_kernel, padding="SAME")
+        second_derivative = tf.nn.conv1d(smooth_first_derivative, derivative_kernel, padding="SAME")
+        inside_cost = -tf.reduce_sum(second_derivative**2)
+
+        # likelihood
+        logp = -.5 * tf.reduce_sum(self.z_placeholder**2) # TODO: use true likelihood
+
+        # maximize inside cost and likelihood. minimize outside cost
+        cost = 1e-7 * inside_cost - 0 * outside_cost + 1.1e7 * logp
+
+        self.remove_peak_spectrum = original
+        _, self.remove_peak_intermediate_zs = self.encode(original)
+        self.remove_peak_gradient = tf.gradients(cost, self.z_placeholder)
+
+    def remove_peak(self, z, step_size):
+        feed_dict = {self.z_placeholder: z}
+        for i in range(len(self.remove_peak_intermediate_zs)):
+            feed_dict[self.intermediate_z_placeholders[i]] = self.remove_peak_intermediate_zs[i]
+        gradient = self.sess.run(self.remove_peak_gradient, feed_dict)[0]
+        scale_factor = step_size / np.linalg.norm(gradient)
+        new_z = z + scale_factor * gradient
+        return new_z, gradient
 
     def train(self, lr, level=None):
         '''Run one training batch to optimize the network with learning rate lr.
@@ -189,19 +220,17 @@ class model:
             randomly from unit normal distributions.
         '''
         feed_dict = {self.z_placeholder: z}
-        if intermediate_zs is None:
-            return self.sess.run(self.s, feed_dict)
-        else:
-            num_zs = len(self.hps.intermediate_z_shapes)
-            for i in range(num_zs):
-                if i < num_zs - len(intermediate_zs):
-                    sample_shape = (z.shape[0], *self.hps.intermediate_z_shapes[i])
-                    sample = np.random.normal(0, 1, sample_shape)
-                    feed_dict[self.intermediate_z_placeholders[i]] = sample
-                else:
-                    index = i - num_zs + len(intermediate_zs)
-                    feed_dict[self.intermediate_z_placeholders[i]] = intermediate_zs[index]
-            return self.sess.run(self.s_from_intermediate_zs, feed_dict)
+        num_input_zs = len(intermediate_zs) if intermediate_zs is not None else 0
+        num_total_zs = len(self.hps.intermediate_z_shapes)
+        for i in range(num_total_zs):
+            if i < num_total_zs - num_input_zs:
+                sample_shape = (z.shape[0], *self.hps.intermediate_z_shapes[i])
+                sample = np.random.normal(0, 1, sample_shape)
+                feed_dict[self.intermediate_z_placeholders[i]] = sample
+            else:
+                index = i - num_total_zs + len(intermediate_zs)
+                feed_dict[self.intermediate_z_placeholders[i]] = intermediate_zs[index]
+        return self.sess.run(self.s_from_intermediate_zs, feed_dict)
 
     def get_likelihood(self, s):
         return self.sess.run(self.logpx, {self.s_placeholder: s})
@@ -219,7 +248,7 @@ class model:
         for i in range(self.hps.n_levels - 1):
             print("l{:2}:".format(i), "\t", self.hps.level_shapes[i])
             print("\t   v")
-            print("\t", self.hps.depth, "flow steps")
+            print("\t", self.hps.level_depths[i], "flow steps")
             print("\t   v")
             print("\t split -> int rep:", self.hps.intermediate_z_shapes[i])
             print("\t   v")
@@ -227,6 +256,6 @@ class model:
             print("\t   v")
         print("l{:2}:".format(self.hps.n_levels - 1), "\t", self.hps.level_shapes[-1])
         print("\t   v")
-        print("\t", self.hps.depth, "flow steps")
+        print("\t", self.hps.level_depths[-1], "flow steps")
         print("\t   v")
         print("fin rep:", self.hps.level_shapes[-1])

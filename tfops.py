@@ -38,12 +38,12 @@ def conv1d(name, z, width, channels_out, initializer=tf.random_normal_initialize
         #x += tf.compat.v1.get_variable("b", [1, 1, width], initializer=tf.zeros_initializer())
         return z
 
-def f(name, z, channels_out):
+def f(name, z, window_size, channels_out):
     _, _, original_channels = int_shape(z)
     with tf.compat.v1.variable_scope(name):
-        z = tf.nn.relu(conv1d('l_1', z, 101, channels_out))
+        z = tf.nn.relu(conv1d('l_1', z, window_size, channels_out))
         z = tf.nn.relu(conv1d('l_2', z, 1, channels_out))
-        z = conv1d('l_last', z, 101, original_channels, initializer=tf.zeros_initializer())
+        z = conv1d('l_last', z, window_size, original_channels, initializer=tf.zeros_initializer())
         return z
 
 def invertible_1x1_conv(name, z, logdet, reverse):
@@ -107,3 +107,10 @@ def gaussian_diag(mean, logsd):
     o.logp = lambda z: tf.reduce_sum(o.logps(z), [1, 2])
     o.get_eps = lambda z: (z - mean) / tf.exp(logsd)
     return o
+
+def create_gaussian_kernel(size, mean, std):
+    d = tf.distributions.Normal(tf.cast(mean, tf.float32), tf.cast(std, tf.float32))
+    vals = d.prob(tf.range(start=-int(size/2), limit=int(size/2)+1, dtype=tf.float32))
+
+    kernel = vals[:, np.newaxis, np.newaxis]
+    return kernel / tf.reduce_sum(kernel)
